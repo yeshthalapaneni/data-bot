@@ -19,7 +19,25 @@ from tools.rag_tool import search_documents
 
 load_dotenv()
 
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+def _get_api_key() -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    try:
+        import streamlit as st
+        key = st.secrets.get("ANTHROPIC_API_KEY")
+    except Exception:
+        key = None
+    if not key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set. Add it to Data-bot/.env locally, "
+            "or under App settings -> Secrets on Streamlit Cloud."
+        )
+    return key
+
+
+client = anthropic.Anthropic(api_key=_get_api_key())
 MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """You are Data-bot, an AI procurement and spend analytics agent sitting on top of Nimbus Retail Co.'s data.
