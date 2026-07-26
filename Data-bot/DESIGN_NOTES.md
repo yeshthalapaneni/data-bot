@@ -7,10 +7,10 @@
 ```
 Ingest (one-time)                 Runtime (per request)
 ────────────────────              ──────────────────────────────────────
-CSVs ──► SQLite (5 tables)        User question (typed or 🎤 spoken)
+CSVs ──► SQLite (5 tables)        User message
                                        │
 Markdown ──┐                           ▼
-           ├──► ChromaDB        Streamlit app (app.py)
+           ├──► ChromaDB        FastAPI /api/chat
 PDF ───────┘    (chunks +              │
                 embeddings)            ▼
                                   Claude claude-sonnet-4-6
@@ -26,12 +26,12 @@ PDF ───────┘    (chunks +              │
                                    └────────┬───────┘
                                             ▼
                                      Synthesized answer
+                                     + tool_calls log
+                                     + sources list
                                             │
                                             ▼
-                                    Streamlit chat UI
+                                     React chat UI
 ```
-
-One process, one deploy target — no separate frontend/backend to run or host.
 
 ---
 
@@ -42,7 +42,7 @@ One process, one deploy target — no separate frontend/backend to run or host.
 **Schema decisions:**
 - Boolean columns (`auto_renew`, `preferred_status`) are normalised from the CSV strings `"True"/"False"` to SQLite integers `1/0` at ingest time, so SQL comparisons work naturally (`WHERE auto_renew = 1`).
 - Dates are kept as ISO-8601 strings (`YYYY-MM-DD`), matching SQLite's `date()` function expectations.
-- Foreign keys are present but not enforced — the CSV data has some intentional orphans (invoices without a PO, POs without a contract).
+- Foreign keys are present but not enforced with `PRAGMA foreign_keys` — the CSV data has some intentional orphans (invoices without a PO, POs without a contract).
 
 ---
 
@@ -79,22 +79,44 @@ Section-based chunking for Markdown preserves semantic boundaries (e.g. the "Ren
 - SQL schema is provided verbatim so Claude writes correct column/table names.
 - Boolean storage format (`1/0`) and date format (`'YYYY-MM-DD'`) are called out explicitly.
 - Anomaly categories are enumerated (split POs, payment-term mismatches, spend over cap, no-contract spend) so Claude proactively surfaces them even for general questions.
+- No emoji in answers — anomalies are flagged with the plain-text prefix `Anomaly:` instead.
 
 **Tool-use loop:** Up to 12 rounds. For cross-source questions (e.g. "invoices with terms shorter than their contract"), Claude typically calls `query_database` twice (once for invoices, once for contracts) then synthesises the join.
 
 ---
 
-## 5. Interface: Streamlit, deliberately simple
+## 5. API surface
 
-A single chat screen — a message list, a text box, and a 🎤 recorder. No dashboards, no sidebars, no configuration.
+```
+POST /api/chat
+  Body:  { message: string, history: [{role, content}] }
+  Returns: { answer: string, tool_calls: [...], sources: [...] }
 
-- **Voice input:** `st.audio_input` captures a WAV clip in-browser; it's transcribed with the free Google Web Speech API (`SpeechRecognition`) and sent to the agent exactly like a typed question. No extra API key required.
-- **Session-only history:** conversation state lives in `st.session_state` — no server-side persistence, matching the demo/MVP scope.
-- **No streaming:** Streamlit re-runs the whole script per interaction, so the answer renders once it's ready rather than token-by-token. Trades perceived latency for simplicity.
+POST /api/chat/stream
+  Same body, returns Server-Sent Events (tool_start / tool_end / text_delta / done)
+
+GET /api/health
+  Returns: { status: "ok", reference_date: "2026-04-21" }
+```
+
+Conversation history is passed from the frontend on every request and threaded into the messages array, giving the agent multi-turn memory without any server-side session state.
 
 ---
 
-## 6. Planted anomalies the agent can detect
+## 6. Frontend
+
+Single-page React app (Vite + TypeScript + Tailwind CSS).
+
+Notable UX choices:
+- **Tool call drawer** — each assistant reply shows a collapsible "N tool calls" section revealing the exact SQL or search query used. This makes the agent's reasoning auditable.
+- **Source pills** — `Database` and `Documents` pills indicate which store contributed to the answer.
+- **Sidebar shortcuts** — 10 pre-seeded questions covering all four question tiers from the brief. Clicking one sends the full question immediately.
+- **Error state** — if the API is unreachable, the assistant bubble shows an amber warning rather than silently failing.
+- **Streaming** — `/api/chat/stream` gives token-by-token text plus live "querying database" / "searching documents" trace while the agent works.
+
+---
+
+## 7. Planted anomalies the agent can detect
 
 The dataset includes intentional data quality issues:
 
@@ -107,20 +129,19 @@ The dataset includes intentional data quality issues:
 
 ---
 
-## 7. Limitations
+## 8. Limitations
 
-- **Currency normalisation:** amounts in EUR/GBP are not converted to USD before aggregation.
-- **No streaming:** long answers have a perceived delay of 3–8 seconds.
-- **Voice accuracy:** Google Web Speech API is free and keyless but less accurate than a paid transcription model on noisy audio.
-- **No auth / rate limiting** — fine for a demo, not for production.
-- **PDF extraction quality:** `pypdf` text extraction degrades on scanned or columnar PDFs.
+- **Currency normalisation:** amounts in EUR/GBP are not converted to USD before aggregation. The agent notes the currency but doesn't FX-convert.
+- **Context window:** very long conversation histories could eventually exceed Claude's context limit. Production would use a sliding window or summary.
+- **No auth / rate limiting** on the API — fine for local demo, not for production.
+- **PDF extraction quality:** `pypdf` text extraction degrades on scanned or columnar PDFs. Three PDFs in this dataset extract cleanly.
 
 ---
 
-## 8. What I'd do with more time
+## 9. What I'd do with more time
 
-1. **Hybrid retrieval:** combine ChromaDB cosine similarity with BM25 keyword search for better exact-term/contract-ID recall.
-2. **Streaming responses:** token-by-token rendering for faster perceived latency.
-3. **FX normalisation:** store a computed `amount_usd` column at ingest time.
-4. **Eval harness:** a golden-question set run after each change to catch regressions.
-5. **Better STT:** swap Google Web Speech for a paid transcription API for noisier environments.
+1. **Hybrid retrieval:** combine ChromaDB cosine similarity with BM25 keyword search (reciprocal rank fusion) to improve recall for exact term / contract-ID lookups.
+2. **FX normalisation:** pull live or fixed EUR/GBP→USD rates at ingest time and store an `amount_usd` column on invoices and POs.
+3. **Eval harness:** build a small golden-question set with expected answers and run it after each code change to catch regressions.
+4. **Metadata filtering:** pass contract_id as a ChromaDB `where` filter when the user references a specific vendor or contract, to avoid cross-contamination from similar documents.
+5. **Postgres + pgvector:** replace SQLite + ChromaDB with a single Postgres instance for production simplicity and better concurrency.

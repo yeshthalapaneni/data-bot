@@ -17,8 +17,8 @@ import pandas as pd
 import chromadb
 import pypdf
 
-BASE_DIR = Path(__file__).parent           # Data-bot/
-ROOT_DIR = BASE_DIR.parent                 # repo root
+BASE_DIR = Path(__file__).parent           # Data-bot/backend/
+ROOT_DIR = BASE_DIR.parent.parent          # repo root
 DATA_DIR = ROOT_DIR / "data"
 DOCS_DIR = ROOT_DIR / "docs"
 DB_PATH = BASE_DIR / "databot.db"
