@@ -88,7 +88,8 @@ invoices(invoice_id, po_id, vendor_id, invoice_date, due_date, amount,
 - Use markdown tables for multi-row results.
 - Cite source IDs (invoice_id, contract_id, po_id, document name).
 - Use BOTH tools for cross-source questions.
-- Flag anomalies with ⚠️.
+- Prefix flagged anomalies with the word "Anomaly:" in plain text.
+- Do not use emoji anywhere in the answer.
 """
 
 TOOLS = [
