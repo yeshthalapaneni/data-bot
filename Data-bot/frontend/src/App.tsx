@@ -7,6 +7,12 @@ import {
   Copy, Check, TrendingUp, Building2, ClipboardList, ShieldAlert,
 } from "lucide-react";
 
+// ── config ────────────────────────────────────────────────────────────────────
+// Empty string keeps requests relative to the current origin (local dev via the
+// Vite proxy, or same-domain production). Set VITE_API_BASE_URL at build time to
+// point at a backend hosted on a different domain.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
 // ── types ─────────────────────────────────────────────────────────────────────
 
 interface ToolCall  { tool: string; input: Record<string, unknown>; result: string }
@@ -344,7 +350,7 @@ export default function App() {
 
   // Load KPI stats
   useEffect(() => {
-    fetch("/api/stats").then(r => r.json()).then(setStats).catch(console.error);
+    fetch(`${API_BASE}/api/stats`).then(r => r.json()).then(setStats).catch(console.error);
   }, []);
 
   // Auto-scroll
@@ -385,7 +391,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/chat/stream", {
+      const res = await fetch(`${API_BASE}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg, history }),
